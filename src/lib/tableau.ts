@@ -1,4 +1,67 @@
 import { DashboardContext, FilterCondition, TableauFilter, WorksheetContext } from "./types";
+
+export async function initializeTableau() {
+  if (!window.tableau?.extensions) {
+    throw new Error("Tableau Extensions API was not found.");
+  }
+
+  await window.tableau.extensions.initializeAsync();
+  return window.tableau.extensions.dashboardContent.dashboard;
+}
+
+export async function getWorksheetContext(dashboard: any): Promise<WorksheetContext[]> {
+  const worksheetContexts: WorksheetContext[] = [];
+
+  for (const worksheet of dashboard.worksheets || []) {
+    let filters: TableauFilter[] = [];
+
+    try {
+      const wsFilters = await worksheet.getFiltersAsync();
+
+      filters = wsFilters.map((filter: any) => {
+        const out: TableauFilter = {
+          field: filter.fieldName,
+          filterType: filter.filterType,
+        };
+
+        if (filter.appliedValues) {
+          out.appliedValues = filter.appliedValues.map((v: any) => v.value);
+        }
+
+        if (filter.minValue !== undefined) out.minValue = filter.minValue;
+        if (filter.maxValue !== undefined) out.maxValue = filter.maxValue;
+
+        return out;
+      });
+    } catch {
+      filters = [];
+    }
+
+    worksheetContexts.push({
+      worksheet_name: worksheet.name,
+      current_filters: filters,
+    });
+  }
+
+  return worksheetContexts;
+}
+
+export function collectAvailableFiltersFromCurrentState(worksheetContexts: WorksheetContext[]) {
+  const seen = new Map<string, { field: string; type: string; allowed_values: Array<string | number> }>();
+
+  for (const ws of worksheetContexts) {
+    for (const f of ws.current_filters || []) {
+      if (!seen.has(f.field)) {
+        seen.set(f.field, {
+          field: f.field,
+          type: "unknown",
+          allowed_values: [],
+        });
+      }
+
+      const entry = seen.get(f.field)!;
+
+      if (Array.isArray(f.appliedValues) && f.appliedValues.length > 0) {
         entry.allowed_values = Array.from(new Set([...(entry.allowed_values || []), ...f.appliedValues]));
       }
     }
