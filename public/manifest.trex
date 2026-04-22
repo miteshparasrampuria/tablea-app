@@ -9,7 +9,7 @@
     <min-api-version>1.10</min-api-version>
 
     <source-location>
-      <url>https://YOUR-HOSTED-EXTENSION-URL/</url>
+      <url>https://tableau-app.onrender.com</url>
     </source-location>
   </dashboard-extension>
 </manifest>
