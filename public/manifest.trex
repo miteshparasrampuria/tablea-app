@@ -5,19 +5,15 @@
     <default-locale>en_US</default-locale>
     <name>SpectraMedix Tableau Agent</name>
     <description>Apply filters and answer questions with a hosted agent API.</description>
-
     <author
-      name="mitesh Parasrampuria"
-      email="miteshparasrampuria@gmail.com"
-      organization="Hello World"
+      name="Your Name"
+      email="you@example.com"
+      organization="Your Org"
       website="https://your-company-site.com" />
-
     <min-api-version>1.10</min-api-version>
-
     <source-location>
       <url>https://tableau-app.onrender.com/</url>
     </source-location>
-
     <icon></icon>
   </dashboard-extension>
 </manifest>
