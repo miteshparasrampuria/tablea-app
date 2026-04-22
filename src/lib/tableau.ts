@@ -1,12 +1,23 @@
 import { DashboardContext, FilterCondition, TableauFilter, WorksheetContext } from "./types";
 
-export async function initializeTableau() {
-  if (!window.tableau?.extensions) {
-    throw new Error("Tableau Extensions API was not found.");
+async function waitForTableauExtensions(timeoutMs = 5000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    if (window.tableau?.extensions) {
+      return window.tableau.extensions;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  await window.tableau.extensions.initializeAsync();
-  return window.tableau.extensions.dashboardContent.dashboard;
+  throw new Error("Tableau Extensions API was not found.");
+}
+
+export async function initializeTableau() {
+  const extensions = await waitForTableauExtensions();
+  await extensions.initializeAsync();
+  return extensions.dashboardContent.dashboard;
 }
 
 export async function getWorksheetContext(dashboard: any): Promise<WorksheetContext[]> {
@@ -62,7 +73,9 @@ export function collectAvailableFiltersFromCurrentState(worksheetContexts: Works
       const entry = seen.get(f.field)!;
 
       if (Array.isArray(f.appliedValues) && f.appliedValues.length > 0) {
-        entry.allowed_values = Array.from(new Set([...(entry.allowed_values || []), ...f.appliedValues]));
+        entry.allowed_values = Array.from(
+          new Set([...(entry.allowed_values || []), ...f.appliedValues])
+        );
       }
     }
   }
