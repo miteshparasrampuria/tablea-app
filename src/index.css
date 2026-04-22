@@ -1,0 +1,68 @@
+:root {
+    background: linear-gradient(180deg, #fbfdff 0%, #f7fbfd 100%);
+    white-space: pre-wrap;
+    margin-bottom: 14px;
+  }
+  
+  .response-meta-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  
+  .section-label {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  
+  .chip-wrap {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  
+  .chip,
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  
+  .pill-soft {
+    background: var(--teal-soft);
+    color: var(--navy);
+  }
+  
+  .pill-success {
+    background: rgba(17, 141, 87, 0.14);
+    color: #f4fffa;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+  }
+  
+  .pill-neutral {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+  }
+  
+  .chip {
+    background: var(--teal-soft);
+    color: var(--navy);
+  }
+  
+  @media (max-width: 900px) {
+    .content-grid,
+    .meta-grid {
+      grid-template-columns: 1fr;
+    }
+  
+    .hero-card h1 {
+      font-size: 24px;
+    }
+  }

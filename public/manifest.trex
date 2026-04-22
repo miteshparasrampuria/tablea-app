@@ -1,23 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest manifest-version="0.1" xmlns="http://www.tableau.com/xml/extension_manifest">
-  <dashboard-extension id="com.spectramedix.llmextension" extension-version="1.0.0">
+<manifest manifest-version="0.1"
+  xmlns="http://www.tableau.com/xml/extension_manifest">
+  <dashboard-extension id="com.example.spectramedixagent" extension-version="1.0.0">
     <default-locale>en_US</default-locale>
-    <name resource-id="name"/>
-    <description resource-id="description"/>
-    <author name="Mitesh" email="your-email@example.com" organization="Spectramedix" website="https://your-site.com"/>
+    <name>SpectraMedix Tableau Agent</name>
+    <description>Apply filters and answer questions with a hosted agent API.</description>
+    <author name="Your Name" email="you@example.com" organization="Your Org"/>
     <min-api-version>1.10</min-api-version>
-    <source-location>
-      <url>https://your-frontend-url.com</url>
-    </source-location>
-    <icon></icon>
-  </dashboard-extension>
 
-  <resources>
-    <resource id="name">
-      <text>LLM Dashboard Assistant</text>
-    </resource>
-    <resource id="description">
-      <text>Ask questions and update dashboard filters from a chat panel.</text>
-    </resource>
-  </resources>
+    <source-location>
+      <url>https://YOUR-HOSTED-EXTENSION-URL/</url>
+    </source-location>
+  </dashboard-extension>
 </manifest>
