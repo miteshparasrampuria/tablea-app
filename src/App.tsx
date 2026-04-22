@@ -5,8 +5,23 @@ import StatusBanner from "./components/StatusBanner";
 import DashboardMeta from "./components/DashboardMeta";
 import ResponsePanel from "./components/ResponsePanel";
 import { askAgent } from "./lib/api";
-import { applyFiltersToDashboard, buildDashboardContext, initializeTableau } from "./lib/tableau";
+import {
+  applyFiltersToDashboard,
+  buildDashboardContext,
+  initializeTableau,
+} from "./lib/tableau";
 import { DashboardContext, FilterCondition } from "./lib/types";
+
+function getSessionId() {
+  const key = "spectramedix-tableau-session-id";
+  const existing = window.localStorage.getItem(key);
+
+  if (existing) return existing;
+
+  const created = `session-${crypto.randomUUID()}`;
+  window.localStorage.setItem(key, created);
+  return created;
+}
 
 export default function App() {
   const [dashboard, setDashboard] = useState<any>(null);
@@ -21,34 +36,55 @@ export default function App() {
   const [confidence, setConfidence] = useState<number | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<FilterCondition[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sessionId, setSessionId] = useState("");
+  const [contextReady, setContextReady] = useState(false);
 
   useEffect(() => {
+    setSessionId(getSessionId());
+
     async function init() {
       try {
+        setStatus("Initializing Tableau extension...");
+
         const dashboardObj = await initializeTableau();
         setDashboard(dashboardObj);
         setDashboardName(dashboardObj.name);
         setWorksheets((dashboardObj.worksheets || []).map((w: any) => w.name));
-        setStatus(`Connected to ${dashboardObj.name}`);
+        setStatus(`Connected to ${dashboardObj.name}. Loading dashboard context...`);
 
         const context = await buildDashboardContext(dashboardObj);
         setDashboardContext(context);
+        setContextReady(true);
+        setStatus(`Connected to ${dashboardObj.name}`);
       } catch (err: any) {
         setError(err.message || "Failed to initialize Tableau extension.");
         setStatus("Initialization failed");
+        setContextReady(false);
       }
     }
 
     init();
   }, []);
 
-  const filterCount = useMemo(() => dashboardContext?.available_filters?.length || 0, [dashboardContext]);
+  const filterCount = useMemo(
+    () => dashboardContext?.available_filters?.length || 0,
+    [dashboardContext]
+  );
 
   async function refreshContext() {
-    if (!dashboard) return;
-    const context = await buildDashboardContext(dashboard);
-    setDashboardContext(context);
-    setWorksheets(context.worksheets);
+    if (!dashboard) return null;
+
+    try {
+      const context = await buildDashboardContext(dashboard);
+      setDashboardContext(context);
+      setWorksheets(context.worksheets);
+      setContextReady(true);
+      return context;
+    } catch (err: any) {
+      setContextReady(false);
+      setError(err.message || "Failed to refresh dashboard context.");
+      return null;
+    }
   }
 
   async function handleAsk() {
@@ -58,25 +94,47 @@ export default function App() {
     setConfidence(null);
     setAppliedFilters([]);
 
-    if (!question.trim()) {
+    const trimmedQuestion = question.trim();
+
+    if (!trimmedQuestion) {
       setError("Please enter a question.");
       return;
     }
 
-    if (!dashboard || !dashboardContext) {
-      setError("Dashboard context is not ready yet.");
+    if (!dashboard) {
+      setError("Dashboard is not connected yet.");
+      return;
+    }
+
+    if (!sessionId) {
+      setError("Session is not ready yet.");
       return;
     }
 
     setLoading(true);
-    setStatus("Sending request to agent...");
+    setStatus("Preparing dashboard context...");
 
     try {
-      const result = await askAgent(question, dashboardContext);
+      let currentContext = dashboardContext;
+
+      if (!currentContext || !contextReady) {
+        currentContext = await refreshContext();
+      }
+
+      if (!currentContext) {
+        throw new Error("Dashboard context is not ready yet. Please try again in a moment.");
+      }
+
+      setStatus("Sending request to agent...");
+
+      const result = await askAgent(sessionId, trimmedQuestion, currentContext);
       const filters = result.filters || [];
 
-      await applyFiltersToDashboard(dashboard, filters);
-      await refreshContext();
+      if (filters.length > 0) {
+        setStatus("Applying filters to Tableau...");
+        await applyFiltersToDashboard(dashboard, filters);
+        await refreshContext();
+      }
 
       setAnswer(result.answer_text || "No answer returned.");
       setIntent(result.intent || "unknown");
@@ -111,8 +169,17 @@ export default function App() {
           </div>
         </div>
 
-        <StatusBanner status={status} error={error} connected={!!dashboard && !error} />
-        <DashboardMeta dashboardName={dashboardName} worksheets={worksheets} filterCount={filterCount} />
+        <StatusBanner
+          status={status}
+          error={error}
+          connected={!!dashboard && !error}
+        />
+
+        <DashboardMeta
+          dashboardName={dashboardName}
+          worksheets={worksheets}
+          filterCount={filterCount}
+        />
       </motion.div>
 
       <div className="content-grid">
@@ -132,9 +199,14 @@ export default function App() {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Example: Filter Region to West and Year to 2025"
+            disabled={loading}
           />
 
-          <button className="send-button" onClick={handleAsk} disabled={loading}>
+          <button
+            className="send-button"
+            onClick={handleAsk}
+            disabled={loading || !dashboard}
+          >
             <Send size={16} />
             <span>{loading ? "Working..." : "Send to Agent"}</span>
           </button>
