@@ -8,15 +8,17 @@ Architecture:
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 import streamlit as st
 
 
 AGENT_API_URL_DEFAULT = "https://tableau-api-agent.onrender.com/ask"
-MCP_SERVER_URL_DEFAULT = ""  # e.g. "http://localhost:8765/apply_filters"
+MCP_SERVER_URL_DEFAULT = os.getenv("MCP_SERVER_URL", "")
 REQUEST_TIMEOUT_SECONDS = 60
 
 
@@ -98,28 +100,88 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
+def _default_dashboard_context() -> dict[str, Any]:
+    return {
+        "dashboard_name": "Untitled Dashboard",
+        "worksheets": [],
+        "available_filters": [],
+        "worksheet_contexts": [],
+        "available_measures": [],
+        "available_chart_types": ["none"],
+    }
+
+
 def _init_state() -> None:
     defaults = {
         "session_id": f"session-{uuid.uuid4()}",
         "messages": [],  # list[dict]: {role, content, meta?}
         "last_filters": [],
-        "dashboard_context": {
-            "dashboard_name": "Untitled Dashboard",
-            "worksheets": [],
-            "available_filters": [],
-            "worksheet_contexts": [],
-            "available_measures": [],
-            "available_chart_types": ["none"],
-        },
+        "dashboard_context": _default_dashboard_context(),
         "agent_url": AGENT_API_URL_DEFAULT,
         "mcp_url": MCP_SERVER_URL_DEFAULT,
         "auto_apply_filters": True,
+        "embedded_mode": False,
+        "context_synced": False,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
 
+def _apply_query_params() -> None:
+    params = st.query_params
+    session_id = params.get("session_id")
+    mcp_url = params.get("mcp_url")
+    embedded = params.get("embedded")
+
+    if session_id:
+        st.session_state.session_id = session_id
+    if mcp_url:
+        st.session_state.mcp_url = mcp_url.rstrip("/")
+    if embedded == "1":
+        st.session_state.embedded_mode = True
+
+
+def _mcp_apply_filters_url(mcp_base: str) -> str:
+    base = mcp_base.rstrip("/")
+    if base.endswith("/apply_filters"):
+        return base
+    return urljoin(base + "/", "apply_filters")
+
+
+def sync_dashboard_context_from_mcp() -> tuple[bool, str]:
+    mcp_base = (st.session_state.mcp_url or "").strip()
+    if not mcp_base:
+        return False, "MCP server URL not configured."
+
+    url = urljoin(
+        mcp_base.rstrip("/") + "/",
+        f"sessions/{st.session_state.session_id}/context",
+    )
+    try:
+        response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        return False, f"Could not load dashboard context from MCP: {exc}"
+
+    context = payload.get("dashboard_context") or {}
+    if not context.get("dashboard_name") and not context.get("available_filters"):
+        return False, "Dashboard context not registered yet by the Tableau extension."
+
+    st.session_state.dashboard_context = context
+    st.session_state.context_synced = True
+    return True, f"Synced context for '{context.get('dashboard_name', 'dashboard')}'."
+
+
 _init_state()
+_apply_query_params()
+
+if st.session_state.embedded_mode and not st.session_state.context_synced:
+    ok, message = sync_dashboard_context_from_mcp()
+    if ok:
+        st.toast(message, icon="✅")
+    else:
+        st.warning(message)
 
 
 # ---------------------------------------------------------------------------
@@ -150,13 +212,13 @@ def apply_filters_via_mcp(filters: list[dict[str, Any]]) -> tuple[bool, str]:
     if not filters:
         return True, "No filters to apply."
 
-    mcp_url = (st.session_state.mcp_url or "").strip()
-    if not mcp_url:
+    mcp_base = (st.session_state.mcp_url or "").strip()
+    if not mcp_base:
         return False, "MCP server URL not configured - filters not pushed to Tableau."
 
     try:
         response = requests.post(
-            mcp_url,
+            _mcp_apply_filters_url(mcp_base),
             json={
                 "session_id": st.session_state.session_id,
                 "dashboard_name": st.session_state.dashboard_context.get("dashboard_name"),
@@ -165,7 +227,7 @@ def apply_filters_via_mcp(filters: list[dict[str, Any]]) -> tuple[bool, str]:
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        return True, f"MCP server applied {len(filters)} filter(s)."
+        return True, f"Queued {len(filters)} filter(s) for Tableau extension."
     except requests.RequestException as exc:
         return False, f"MCP server error: {exc}"
 
@@ -216,43 +278,54 @@ def render_assistant_message(meta: dict[str, Any]) -> None:
 # Sidebar - configuration
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### Configuration")
+    if st.session_state.embedded_mode:
+        st.success("Embedded in Tableau dashboard")
+        st.caption("Dashboard context is synced from the Tableau extension via MCP.")
+        if st.button("Refresh dashboard context", use_container_width=True):
+            st.session_state.context_synced = False
+            ok, message = sync_dashboard_context_from_mcp()
+            if ok:
+                st.success(message)
+            else:
+                st.error(message)
+    else:
+        st.markdown("### Configuration")
 
-    st.session_state.agent_url = st.text_input(
-        "LLM Agent API URL",
-        value=st.session_state.agent_url,
-        help="POST {session_id, question, dashboard_context} -> JSON",
-    )
-    st.session_state.mcp_url = st.text_input(
-        "Tableau MCP server URL",
-        value=st.session_state.mcp_url,
-        placeholder="http://localhost:8765/apply_filters",
-        help="Optional. When set, filters from the agent are POSTed here to update the live dashboard.",
-    )
-    st.session_state.auto_apply_filters = st.toggle(
-        "Auto-apply filters via MCP",
-        value=st.session_state.auto_apply_filters,
-    )
+        st.session_state.agent_url = st.text_input(
+            "LLM Agent API URL",
+            value=st.session_state.agent_url,
+            help="POST {session_id, question, dashboard_context} -> JSON",
+        )
+        st.session_state.mcp_url = st.text_input(
+            "Tableau MCP server URL",
+            value=st.session_state.mcp_url,
+            placeholder="http://localhost:8765",
+            help="MCP bridge base URL. Filters are POSTed to /apply_filters.",
+        )
+        st.session_state.auto_apply_filters = st.toggle(
+            "Auto-apply filters via MCP",
+            value=st.session_state.auto_apply_filters,
+        )
 
-    st.divider()
-    st.markdown("### Dashboard Context")
-    st.caption(
-        "Sent to the LLM agent so it knows which fields and values exist. "
-        "Edit this JSON to match your Tableau dashboard."
-    )
+        st.divider()
+        st.markdown("### Dashboard Context")
+        st.caption(
+            "Sent to the LLM agent so it knows which fields and values exist. "
+            "When using Pattern A, the Tableau extension fills this automatically."
+        )
 
-    context_text = st.text_area(
-        "dashboard_context (JSON)",
-        value=json.dumps(st.session_state.dashboard_context, indent=2),
-        height=280,
-        label_visibility="collapsed",
-    )
-    if st.button("Save context", use_container_width=True):
-        try:
-            st.session_state.dashboard_context = json.loads(context_text)
-            st.success("Dashboard context updated.")
-        except json.JSONDecodeError as exc:
-            st.error(f"Invalid JSON: {exc}")
+        context_text = st.text_area(
+            "dashboard_context (JSON)",
+            value=json.dumps(st.session_state.dashboard_context, indent=2),
+            height=280,
+            label_visibility="collapsed",
+        )
+        if st.button("Save context", use_container_width=True):
+            try:
+                st.session_state.dashboard_context = json.loads(context_text)
+                st.success("Dashboard context updated.")
+            except json.JSONDecodeError as exc:
+                st.error(f"Invalid JSON: {exc}")
 
     st.divider()
     st.markdown("### Session")
@@ -260,7 +333,8 @@ with st.sidebar:
     if st.button("Reset chat", use_container_width=True):
         st.session_state.messages = []
         st.session_state.last_filters = []
-        st.session_state.session_id = f"session-{uuid.uuid4()}"
+        if not st.session_state.embedded_mode:
+            st.session_state.session_id = f"session-{uuid.uuid4()}"
         st.rerun()
 
 

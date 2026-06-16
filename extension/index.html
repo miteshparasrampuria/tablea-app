@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SpectraMedix Tableau Agent</title>
+    <script src="https://extensions.tableauusercontent.com/tableau.extensions.1.latest.js"></script>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: "Segoe UI", sans-serif;
+        background: #f4f7fb;
+      }
+      #status-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: #0f2c4a;
+        color: #fff;
+        font-size: 12px;
+      }
+      #status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #fbbf24;
+      }
+      #status-dot.ok { background: #34d399; }
+      #status-dot.err { background: #f87171; }
+      #chat-frame {
+        width: 100%;
+        height: calc(100% - 32px);
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status-bar">
+      <span id="status-dot"></span>
+      <span id="status-text">Initializing Tableau extension…</span>
+    </div>
+    <iframe id="chat-frame" title="SpectraMedix Tableau Agent Chat"></iframe>
+    <script src="./config.js"></script>
+    <script src="./extension.js"></script>
+  </body>
+</html>
