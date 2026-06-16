@@ -64,10 +64,3 @@ Expected response:
 
 Your MCP server is responsible for translating that into Tableau REST / JS
 Extensions calls.
-
-## Legacy React extension
-
-The old Tableau dashboard-extension React app (`src/`, `index.html`,
-`manifest.trex`, etc.) is left in place but is no longer the primary entry
-point. It only works when loaded *inside* a Tableau dashboard as an extension,
-which is why it appeared broken when opened as a normal webpage.

@@ -67,6 +67,28 @@ st.markdown(
         font-size: 13px;
         font-weight: 500;
       }
+      .answer-card {
+        background: linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%);
+        border-left: 5px solid #137b80;
+        border-radius: 12px;
+        padding: 18px 22px;
+        margin: 6px 0 14px 0;
+        box-shadow: 0 4px 14px rgba(15, 44, 74, 0.08);
+        font-size: 17px;
+        line-height: 1.55;
+        color: #0f2c4a;
+        font-weight: 500;
+      }
+      .answer-card .answer-label {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #137b80;
+        margin-bottom: 8px;
+      }
+      .meta-row { margin-top: 4px; margin-bottom: 10px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -167,38 +189,27 @@ def render_filters(filters: list[dict[str, Any]]) -> None:
     st.markdown(chips_html, unsafe_allow_html=True)
 
 
+def render_answer_highlight(answer_text: str) -> None:
+    """Render the agent's answer_text as the visual focal point of the reply."""
+    safe = (answer_text or "_(empty answer)_").replace("\n", "<br/>")
+    st.markdown(
+        f"<div class='answer-card'>"
+        f"<span class='answer-label'>Answer</span>{safe}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_assistant_message(meta: dict[str, Any]) -> None:
-    """Render the rich content for an assistant turn (intent, confidence, filters)."""
-    intent = meta.get("intent", "n/a")
-    confidence = meta.get("confidence")
-    confidence_str = f"{confidence:.2f}" if isinstance(confidence, (int, float)) else "n/a"
-
-    cols = st.columns([1, 1, 4])
-    cols[0].markdown(
-        f"<span class='pill pill-info'>Intent: {intent}</span>",
-        unsafe_allow_html=True,
-    )
-    cols[1].markdown(
-        f"<span class='pill pill-info'>Confidence: {confidence_str}</span>",
-        unsafe_allow_html=True,
-    )
-
-    filters = meta.get("filters") or []
-    if filters:
-        st.markdown("**Filters proposed by agent**")
-        render_filters(filters)
-
-        mcp_status = meta.get("mcp_status")
-        if mcp_status:
-            ok, message = mcp_status
-            pill_class = "pill-ok" if ok else "pill-warn"
-            st.markdown(
-                f"<span class='pill {pill_class}'>{message}</span>",
-                unsafe_allow_html=True,
-            )
-
-        with st.expander("Raw filter JSON"):
-            st.code(json.dumps(filters, indent=2), language="json")
+    """Show only the MCP push status (if any). Filters/intent/confidence are hidden."""
+    mcp_status = meta.get("mcp_status")
+    if mcp_status:
+        ok, message = mcp_status
+        pill_class = "pill-ok" if ok else "pill-warn"
+        st.markdown(
+            f"<span class='pill {pill_class}'>{message}</span>",
+            unsafe_allow_html=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -279,9 +290,11 @@ top_cols[3].metric("Messages", len(st.session_state.messages))
 # ---------------------------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
         if msg["role"] == "assistant" and msg.get("meta"):
+            render_answer_highlight(msg["content"])
             render_assistant_message(msg["meta"])
+        else:
+            st.markdown(msg["content"])
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +344,8 @@ if prompt:
                 "raw": result,
             }
 
-            placeholder.markdown(answer_text)
+            placeholder.empty()
+            render_answer_highlight(answer_text)
             render_assistant_message(meta)
 
             st.session_state.last_filters = filters
