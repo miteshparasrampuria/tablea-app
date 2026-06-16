@@ -63,9 +63,9 @@ When opened from the Tableau extension, Streamlit receives query params:
 
 ---
 
-## 3. Host the Tableau extension
+## 3. Host the Tableau extension (Render Static Site)
 
-1. Edit `extension/config.js`:
+Production URLs are already set in `extension/config.js`:
 
 ```javascript
 window.SPECTRAMEDIX_CONFIG = {
@@ -75,18 +75,47 @@ window.SPECTRAMEDIX_CONFIG = {
 };
 ```
 
-2. Edit `extension/manifest.trex` — set `<url>` to your hosted `index.html` (must be **HTTPS**):
+### Create the static site on Render
+
+1. [Render Dashboard](https://dashboard.render.com) → **New** → **Static Site**
+2. Connect repo: `miteshparasrampuria/tablea-app`, branch `main`
+3. Settings:
+
+| Field | Value |
+|-------|--------|
+| **Name** | `tableau-extension` (URL becomes `https://tableau-extension.onrender.com`) |
+| **Build command** | `echo "static"` (or leave blank) |
+| **Publish directory** | `extension` |
+
+4. Click **Create Static Site** and wait for deploy.
+
+**Or** use the repo’s `render.yaml`: **New → Blueprint** → select the repo (creates `tableau-extension` automatically).
+
+### Verify after deploy
+
+Open in a browser:
+
+- `https://tableau-extension.onrender.com/index.html`
+- `https://tableau-extension.onrender.com/manifest.trex`
+- `https://tableau-extension.onrender.com/config.js`
+
+`manifest.trex` points to:
 
 ```xml
-<url>https://your-extension-host.example.com/index.html</url>
+<url>https://tableau-extension.onrender.com/index.html</url>
 ```
 
-3. Host `extension/` as static files (Render static site, S3, Azure Blob, GitHub Pages, etc.).
+### Tableau Desktop / Server
 
-4. In **Tableau Desktop / Server / Cloud**:
-   - Dashboard → **Extensions** → add extension
-   - Choose **My Extensions** → select `manifest.trex` (or register on Server)
-   - Resize the extension zone to fit the chat widget
+1. Dashboard → **Extensions** → drag **Extension** onto the layout
+2. **My Extensions** → select `manifest.trex`  
+   (download from `https://tableau-extension.onrender.com/manifest.trex` or use a local copy from the repo)
+3. Allow permissions → resize the extension zone
+4. Safe-list on Tableau Server:
+   - `https://tableau-extension.onrender.com`
+   - `https://tableau-app.onrender.com`
+   - `https://tableau-mcpbridge.onrender.com`
+   - `https://tableau-api-agent.onrender.com`
 
 ---
 

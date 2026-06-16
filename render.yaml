@@ -1,0 +1,9 @@
+# Render Blueprint — Tableau extension static site (Step 2).
+# MCP + Streamlit are separate Render web services (already deployed).
+services:
+  - type: web
+    name: tableau-extension
+    runtime: static
+    branch: main
+    buildCommand: echo "No build — serving extension/ as static files"
+    staticPublishPath: extension
