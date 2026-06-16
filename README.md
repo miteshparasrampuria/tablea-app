@@ -38,7 +38,7 @@ uvicorn app:app --host 0.0.0.0 --port 8765
 - Build: `pip install -r mcp_server/requirements.txt`
 - Start: `cd mcp_server && uvicorn app:app --host 0.0.0.0 --port $PORT`
 
-Note the public base URL, e.g. `https://your-mcp.onrender.com`.
+Note the public base URL: `https://tableau-mcpbridge.onrender.com`.
 
 **Health check:** `GET /health`
 
@@ -54,9 +54,9 @@ streamlit run app.py --server.port=8501 --server.address=0.0.0.0
 **Render / Streamlit Cloud**
 
 - Start: `streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true`
-- Optional env: `MCP_SERVER_URL=https://your-mcp.onrender.com`
+- Env (optional override): `MCP_SERVER_URL=https://tableau-mcpbridge.onrender.com`
 
-Note the public URL, e.g. `https://your-streamlit.onrender.com`.
+Note the public URL: `https://tableau-app.onrender.com`.
 
 When opened from the Tableau extension, Streamlit receives query params:
 `?session_id=...&mcp_url=...&embedded=1` and auto-loads dashboard context from MCP.
@@ -69,8 +69,8 @@ When opened from the Tableau extension, Streamlit receives query params:
 
 ```javascript
 window.SPECTRAMEDIX_CONFIG = {
-  STREAMLIT_URL: "https://your-streamlit.onrender.com",
-  MCP_BASE_URL: "https://your-mcp.onrender.com",
+  STREAMLIT_URL: "https://tableau-app.onrender.com",
+  MCP_BASE_URL: "https://tableau-mcpbridge.onrender.com",
   POLL_INTERVAL_MS: 2000,
 };
 ```

@@ -18,7 +18,9 @@ import streamlit as st
 
 
 AGENT_API_URL_DEFAULT = "https://tableau-api-agent.onrender.com/ask"
-MCP_SERVER_URL_DEFAULT = os.getenv("MCP_SERVER_URL", "")
+MCP_SERVER_URL_DEFAULT = os.getenv(
+    "MCP_SERVER_URL", "https://tableau-mcpbridge.onrender.com"
+)
 REQUEST_TIMEOUT_SECONDS = 60
 
 
@@ -299,7 +301,7 @@ with st.sidebar:
         st.session_state.mcp_url = st.text_input(
             "Tableau MCP server URL",
             value=st.session_state.mcp_url,
-            placeholder="http://localhost:8765",
+            placeholder="https://tableau-mcpbridge.onrender.com",
             help="MCP bridge base URL. Filters are POSTed to /apply_filters.",
         )
         st.session_state.auto_apply_filters = st.toggle(
