@@ -21,6 +21,18 @@
     if (level === "err") statusDot.classList.add("err");
   }
 
+  function describeError(err) {
+    if (err == null) return "unknown error (no details)";
+    if (typeof err === "string") return err;
+    if (err.message) return err.message;
+    if (err.errorCode) return "Tableau error code " + err.errorCode;
+    try {
+      return JSON.stringify(err);
+    } catch (e) {
+      return String(err);
+    }
+  }
+
   function assertConfig() {
     if (!STREAMLIT_URL || STREAMLIT_URL.includes("YOUR_")) {
       throw new Error("Set STREAMLIT_URL in extension/config.js");
@@ -228,22 +240,45 @@
       }
 
       setStatus("Connecting to Tableau…");
+      try {
+        await tableau.extensions.initializeAsync();
+      } catch (err) {
+        throw new Error("initializeAsync failed: " + describeError(err));
+      }
 
-      await tableau.extensions.initializeAsync();
       dashboard = tableau.extensions.dashboardContent.dashboard;
+      if (!dashboard) {
+        throw new Error("No dashboard content available from Tableau.");
+      }
 
       setStatus("Reading dashboard filters…");
-      const context = await readDashboardContext(dashboard);
+      let context;
+      try {
+        context = await readDashboardContext(dashboard);
+      } catch (err) {
+        throw new Error("Reading dashboard failed: " + describeError(err));
+      }
+
+      // Load the chat immediately; filter sync is best-effort.
+      chatFrame.src = buildStreamlitUrl();
+      setStatus("Chat ready · " + (context.dashboard_name || "dashboard"), "ok");
 
       setStatus("Registering session with MCP…");
-      await registerContext(context);
+      try {
+        await registerContext(context);
+        setStatus("Chat ready · " + (context.dashboard_name || "dashboard"), "ok");
+      } catch (err) {
+        console.error("MCP register failed", err);
+        setStatus(
+          "Chat ready (MCP sync failed: " + describeError(err) + ")",
+          "err"
+        );
+      }
 
-      chatFrame.src = buildStreamlitUrl();
-      setStatus("Chat ready · " + context.dashboard_name, "ok");
       startPolling();
     } catch (err) {
       console.error(err);
-      setStatus("Extension init failed: " + err.message, "err");
+      setStatus("Extension init failed: " + describeError(err), "err");
     }
   }
 
