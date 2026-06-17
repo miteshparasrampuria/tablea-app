@@ -83,7 +83,7 @@ window.SPECTRAMEDIX_CONFIG = {
 
 | Field | Value |
 |-------|--------|
-| **Name** | `tableau-extension` (URL becomes `https://tableau-extension.onrender.com`) |
+| **Name** | e.g. `tableau-extension` (your URL: `https://tableau-extension-i792.onrender.com`) |
 | **Build command** | `echo "static"` (or leave blank) |
 | **Publish directory** | `extension` |
 
@@ -95,24 +95,24 @@ window.SPECTRAMEDIX_CONFIG = {
 
 Open in a browser:
 
-- `https://tableau-extension.onrender.com/index.html`
-- `https://tableau-extension.onrender.com/manifest.trex`
-- `https://tableau-extension.onrender.com/config.js`
+- `https://tableau-extension-i792.onrender.com/index.html`
+- `https://tableau-extension-i792.onrender.com/manifest.trex`
+- `https://tableau-extension-i792.onrender.com/config.js`
 
 `manifest.trex` points to:
 
 ```xml
-<url>https://tableau-extension.onrender.com/index.html</url>
+<url>https://tableau-extension-i792.onrender.com/index.html</url>
 ```
 
 ### Tableau Desktop / Server
 
 1. Dashboard → **Extensions** → drag **Extension** onto the layout
 2. **My Extensions** → select `manifest.trex`  
-   (download from `https://tableau-extension.onrender.com/manifest.trex` or use a local copy from the repo)
+   (download from `https://tableau-extension-i792.onrender.com/manifest.trex` or use a local copy from the repo)
 3. Allow permissions → resize the extension zone
 4. Safe-list on Tableau Server:
-   - `https://tableau-extension.onrender.com`
+   - `https://tableau-extension-i792.onrender.com`
    - `https://tableau-app.onrender.com`
    - `https://tableau-mcpbridge.onrender.com`
    - `https://tableau-api-agent.onrender.com`
