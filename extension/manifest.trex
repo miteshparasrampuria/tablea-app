@@ -13,10 +13,10 @@
   </dashboard-extension>
   <resources>
     <resource id="name">
-      <text>SpectraMedix Tableau Agent</text>
+      <text locale="en_US">SpectraMedix Tableau Agent</text>
     </resource>
     <resource id="description">
-      <text>Chat with your dashboard to apply filters via AI agent and MCP bridge.</text>
+      <text locale="en_US">Chat with your dashboard to apply filters via AI agent and MCP bridge.</text>
     </resource>
   </resources>
 </manifest>
