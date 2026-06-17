@@ -214,33 +214,18 @@
     pollTimer = setInterval(pollPendingFilters, POLL_INTERVAL_MS);
   }
 
-  function waitForTableau(timeoutMs) {
-    return new Promise(function (resolve, reject) {
-      var elapsed = 0;
-      var timer = setInterval(function () {
-        if (typeof tableau !== "undefined" && tableau.extensions) {
-          clearInterval(timer);
-          resolve();
-          return;
-        }
-        elapsed += 100;
-        if (elapsed >= timeoutMs) {
-          clearInterval(timer);
-          reject(
-            new Error(
-              "Tableau Extensions API not loaded. Use this extension inside Tableau Desktop/Server, and ensure extensions.tableauusercontent.com is reachable."
-            )
-          );
-        }
-      }, 100);
-    });
-  }
-
   async function initialize() {
     try {
       assertConfig();
-      setStatus("Loading Tableau API…");
-      await waitForTableau(20000);
+
+      if (typeof tableau === "undefined" || !tableau.extensions) {
+        setStatus(
+          "Preview mode — open inside Tableau Desktop to sync dashboard filters.",
+          "err"
+        );
+        chatFrame.src = buildStreamlitUrl();
+        return;
+      }
 
       setStatus("Connecting to Tableau…");
 
