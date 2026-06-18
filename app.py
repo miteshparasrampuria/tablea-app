@@ -1,26 +1,22 @@
 """SpectraMedix Tableau Agent - Streamlit chat UI.
 
 Architecture:
-    User <-> Streamlit chat  <-->  LLM Agent API (/ask)   -> returns {answer_text, filters, ...}
-                              <-->  Tableau MCP server     -> applies filters to live dashboard
+    User <-> Streamlit chat  -->  LLM Agent API (/ask) {session_id, question}
+    The agent reads dashboard context from, and applies filters via, the
+    Tableau MCP server. The UI only sends the question + session_id and renders
+    the agent's plain-text answer.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import uuid
 from typing import Any
-from urllib.parse import urljoin
 
 import requests
 import streamlit as st
 
 
 AGENT_API_URL_DEFAULT = "https://tableau-api-agent.onrender.com/ask"
-MCP_SERVER_URL_DEFAULT = os.getenv(
-    "MCP_SERVER_URL", "https://tableau-mcpbridge.onrender.com"
-)
 REQUEST_TIMEOUT_SECONDS = 60
 
 
@@ -31,12 +27,13 @@ st.set_page_config(
     page_title="SpectraMedix Tableau Agent",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown(
     """
     <style>
+      [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none !important; }
       .block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 1200px; }
       .hero {
         background: linear-gradient(135deg, #0f2c4a 0%, #137b80 100%);
@@ -48,29 +45,6 @@ st.markdown(
       }
       .hero h1 { margin: 0; font-size: 26px; font-weight: 700; }
       .hero p  { margin: 4px 0 0; opacity: 0.85; font-size: 14px; }
-      .pill {
-        display: inline-block;
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 600;
-        margin-right: 6px;
-      }
-      .pill-ok    { background: #d1fae5; color: #065f46; }
-      .pill-warn  { background: #fef3c7; color: #92400e; }
-      .pill-err   { background: #fee2e2; color: #991b1b; }
-      .pill-info  { background: #e0f2fe; color: #075985; }
-      .filter-chip {
-        display: inline-block;
-        background: #eef6ff;
-        color: #0f2c4a;
-        border: 1px solid #cfe2ff;
-        padding: 6px 10px;
-        margin: 3px 4px 0 0;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
-      }
       .answer-card {
         background: linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%);
         border-left: 5px solid #137b80;
@@ -92,7 +66,6 @@ st.markdown(
         color: #137b80;
         margin-bottom: 8px;
       }
-      .meta-row { margin-top: 4px; margin-bottom: 10px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -102,28 +75,12 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
-def _default_dashboard_context() -> dict[str, Any]:
-    return {
-        "dashboard_name": "Untitled Dashboard",
-        "worksheets": [],
-        "available_filters": [],
-        "worksheet_contexts": [],
-        "available_measures": [],
-        "available_chart_types": ["none"],
-    }
-
-
 def _init_state() -> None:
     defaults = {
         "session_id": f"session-{uuid.uuid4()}",
-        "messages": [],  # list[dict]: {role, content, meta?}
-        "last_filters": [],
-        "dashboard_context": _default_dashboard_context(),
+        "messages": [],  # list[dict]: {role, content, answer_card?}
         "agent_url": AGENT_API_URL_DEFAULT,
-        "mcp_url": MCP_SERVER_URL_DEFAULT,
-        "auto_apply_filters": True,
         "embedded_mode": False,
-        "context_synced": False,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -132,69 +89,30 @@ def _init_state() -> None:
 def _apply_query_params() -> None:
     params = st.query_params
     session_id = params.get("session_id")
-    mcp_url = params.get("mcp_url")
     embedded = params.get("embedded")
 
     if session_id:
         st.session_state.session_id = session_id
-    if mcp_url:
-        st.session_state.mcp_url = mcp_url.rstrip("/")
     if embedded == "1":
         st.session_state.embedded_mode = True
 
 
-def _mcp_apply_filters_url(mcp_base: str) -> str:
-    base = mcp_base.rstrip("/")
-    if base.endswith("/apply_filters"):
-        return base
-    return urljoin(base + "/", "apply_filters")
-
-
-def sync_dashboard_context_from_mcp() -> tuple[bool, str]:
-    mcp_base = (st.session_state.mcp_url or "").strip()
-    if not mcp_base:
-        return False, "MCP server URL not configured."
-
-    url = urljoin(
-        mcp_base.rstrip("/") + "/",
-        f"sessions/{st.session_state.session_id}/context",
-    )
-    try:
-        response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
-        response.raise_for_status()
-        payload = response.json()
-    except requests.RequestException as exc:
-        return False, f"Could not load dashboard context from MCP: {exc}"
-
-    context = payload.get("dashboard_context") or {}
-    if not context.get("dashboard_name") and not context.get("available_filters"):
-        return False, "Dashboard context not registered yet by the Tableau extension."
-
-    st.session_state.dashboard_context = context
-    st.session_state.context_synced = True
-    return True, f"Synced context for '{context.get('dashboard_name', 'dashboard')}'."
-
-
 _init_state()
 _apply_query_params()
-
-if st.session_state.embedded_mode and not st.session_state.context_synced:
-    ok, message = sync_dashboard_context_from_mcp()
-    if ok:
-        st.toast(message, icon="✅")
-    else:
-        st.warning(message)
 
 
 # ---------------------------------------------------------------------------
 # API helpers
 # ---------------------------------------------------------------------------
 def call_agent(question: str) -> dict[str, Any]:
-    """POST to the LLM agent API and return the parsed JSON response."""
+    """POST to the LLM agent API and return the parsed JSON response.
+
+    The agent reads the dashboard context from the MCP server and applies filters
+    itself, so the UI only needs to send the question and session_id.
+    """
     payload = {
         "session_id": st.session_state.session_id,
         "question": question,
-        "dashboard_context": st.session_state.dashboard_context,
     }
     response = requests.post(
         st.session_state.agent_url,
@@ -206,53 +124,9 @@ def call_agent(question: str) -> dict[str, Any]:
     return response.json()
 
 
-def apply_filters_via_mcp(filters: list[dict[str, Any]]) -> tuple[bool, str]:
-    """Forward the agent's filter JSON to the Tableau MCP server.
-
-    Returns (ok, message). When no MCP URL is configured this is a no-op.
-    """
-    if not filters:
-        return True, "No filters to apply."
-
-    mcp_base = (st.session_state.mcp_url or "").strip()
-    if not mcp_base:
-        return False, "MCP server URL not configured - filters not pushed to Tableau."
-
-    try:
-        response = requests.post(
-            _mcp_apply_filters_url(mcp_base),
-            json={
-                "session_id": st.session_state.session_id,
-                "dashboard_name": st.session_state.dashboard_context.get("dashboard_name"),
-                "filters": filters,
-            },
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        return True, f"Queued {len(filters)} filter(s) for Tableau extension."
-    except requests.RequestException as exc:
-        return False, f"MCP server error: {exc}"
-
-
 # ---------------------------------------------------------------------------
 # Rendering helpers
 # ---------------------------------------------------------------------------
-def render_filters(filters: list[dict[str, Any]]) -> None:
-    if not filters:
-        st.caption("No filters returned.")
-        return
-
-    chips_html = ""
-    for f in filters:
-        field = f.get("field", "?")
-        operator = f.get("operator", "=")
-        value = f.get("value", "")
-        if isinstance(value, list):
-            value = ", ".join(str(v) for v in value)
-        chips_html += f"<span class='filter-chip'><b>{field}</b> {operator} {value}</span>"
-    st.markdown(chips_html, unsafe_allow_html=True)
-
-
 def render_answer_highlight(answer_text: str) -> None:
     """Render the agent's answer_text as the visual focal point of the reply."""
     safe = (answer_text or "_(empty answer)_").replace("\n", "<br/>")
@@ -262,82 +136,6 @@ def render_answer_highlight(answer_text: str) -> None:
         f"</div>",
         unsafe_allow_html=True,
     )
-
-
-def render_assistant_message(meta: dict[str, Any]) -> None:
-    """Show only the MCP push status (if any). Filters/intent/confidence are hidden."""
-    mcp_status = meta.get("mcp_status")
-    if mcp_status:
-        ok, message = mcp_status
-        pill_class = "pill-ok" if ok else "pill-warn"
-        st.markdown(
-            f"<span class='pill {pill_class}'>{message}</span>",
-            unsafe_allow_html=True,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Sidebar - configuration
-# ---------------------------------------------------------------------------
-with st.sidebar:
-    if st.session_state.embedded_mode:
-        st.success("Embedded in Tableau dashboard")
-        st.caption("Dashboard context is synced from the Tableau extension via MCP.")
-        if st.button("Refresh dashboard context", use_container_width=True):
-            st.session_state.context_synced = False
-            ok, message = sync_dashboard_context_from_mcp()
-            if ok:
-                st.success(message)
-            else:
-                st.error(message)
-    else:
-        st.markdown("### Configuration")
-
-        st.session_state.agent_url = st.text_input(
-            "LLM Agent API URL",
-            value=st.session_state.agent_url,
-            help="POST {session_id, question, dashboard_context} -> JSON",
-        )
-        st.session_state.mcp_url = st.text_input(
-            "Tableau MCP server URL",
-            value=st.session_state.mcp_url,
-            placeholder="https://tableau-mcpbridge.onrender.com",
-            help="MCP bridge base URL. Filters are POSTed to /apply_filters.",
-        )
-        st.session_state.auto_apply_filters = st.toggle(
-            "Auto-apply filters via MCP",
-            value=st.session_state.auto_apply_filters,
-        )
-
-        st.divider()
-        st.markdown("### Dashboard Context")
-        st.caption(
-            "Sent to the LLM agent so it knows which fields and values exist. "
-            "When using Pattern A, the Tableau extension fills this automatically."
-        )
-
-        context_text = st.text_area(
-            "dashboard_context (JSON)",
-            value=json.dumps(st.session_state.dashboard_context, indent=2),
-            height=280,
-            label_visibility="collapsed",
-        )
-        if st.button("Save context", use_container_width=True):
-            try:
-                st.session_state.dashboard_context = json.loads(context_text)
-                st.success("Dashboard context updated.")
-            except json.JSONDecodeError as exc:
-                st.error(f"Invalid JSON: {exc}")
-
-    st.divider()
-    st.markdown("### Session")
-    st.code(st.session_state.session_id, language="text")
-    if st.button("Reset chat", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.last_filters = []
-        if not st.session_state.embedded_mode:
-            st.session_state.session_id = f"session-{uuid.uuid4()}"
-        st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -353,22 +151,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ctx = st.session_state.dashboard_context
-top_cols = st.columns(4)
-top_cols[0].metric("Dashboard", ctx.get("dashboard_name", "—"))
-top_cols[1].metric("Worksheets", len(ctx.get("worksheets", [])))
-top_cols[2].metric("Known filters", len(ctx.get("available_filters", [])))
-top_cols[3].metric("Messages", len(st.session_state.messages))
-
 
 # ---------------------------------------------------------------------------
 # Chat history
 # ---------------------------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        if msg["role"] == "assistant" and msg.get("meta"):
+        if msg["role"] == "assistant" and msg.get("answer_card"):
             render_answer_highlight(msg["content"])
-            render_assistant_message(msg["meta"])
         else:
             st.markdown(msg["content"])
 
@@ -406,25 +196,10 @@ if prompt:
             st.session_state.messages.append({"role": "assistant", "content": err})
         else:
             answer_text = result.get("answer_text") or result.get("answer") or "_(empty answer)_"
-            filters = result.get("filters") or []
-
-            mcp_status = None
-            if filters and st.session_state.auto_apply_filters:
-                mcp_status = apply_filters_via_mcp(filters)
-
-            meta = {
-                "intent": result.get("intent", "unknown"),
-                "confidence": result.get("confidence"),
-                "filters": filters,
-                "mcp_status": mcp_status,
-                "raw": result,
-            }
 
             placeholder.empty()
             render_answer_highlight(answer_text)
-            render_assistant_message(meta)
 
-            st.session_state.last_filters = filters
             st.session_state.messages.append(
-                {"role": "assistant", "content": answer_text, "meta": meta}
+                {"role": "assistant", "content": answer_text, "answer_card": True}
             )

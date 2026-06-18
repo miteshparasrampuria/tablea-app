@@ -11,9 +11,14 @@ Tableau Dashboard
         ├── polls MCP for pending filters     ◀─GET───  MCP /sessions/{id}/pending_filters
         ├── applies filters locally           applyFilterAsync()
         └── embeds Streamlit chat UI (iframe)
-              ├── POST /ask ──▶ LLM Agent API
-              └── POST /apply_filters ──▶ MCP bridge
+              └── POST /ask {session_id, question} ──▶ LLM Agent API
+                                  ├── GET /sessions/{id}/context  ──▶ MCP bridge
+                                  └── (tool) POST /apply_filters  ──▶ MCP bridge
 ```
+
+The LLM agent reads the dashboard context from MCP and calls the MCP bridge (via
+an `apply_filters` tool) to queue filters. The Streamlit UI just sends the
+question + session_id and renders the agent's plain-text answer.
 
 ## Components
 
@@ -128,12 +133,15 @@ Ensure your agent accepts:
 ```json
 {
   "session_id": "session-...",
-  "question": "Filter region to West",
-  "dashboard_context": { ... }
+  "question": "Filter region to West"
 }
 ```
 
-And returns:
+The agent uses `session_id` to read the dashboard context from MCP
+(`GET /sessions/{id}/context`) so it knows which filters exist, then calls
+`POST /apply_filters` on the MCP bridge itself (via its `apply_filters` tool).
+The MCP base URL is configured on the agent via the `MCP_SERVER_URL` env var.
+It returns:
 
 ```json
 {
@@ -144,7 +152,9 @@ And returns:
 }
 ```
 
-Filter `field` names must match Tableau field names exactly (the extension reads these from the dashboard).
+`answer_text` is what the UI shows the user; `filters` is informational (the agent
+has already applied them). Filter `field` names must match Tableau field names
+exactly (the extension reads these from the dashboard).
 
 ---
 
@@ -152,12 +162,14 @@ Filter `field` names must match Tableau field names exactly (the extension reads
 
 1. Extension reads dashboard filters → `PUT /sessions/{id}/context`
 2. User types in Streamlit chat
-3. Streamlit → Agent `/ask` with `dashboard_context`
-4. Agent returns `{ answer_text, filters }`
-5. Streamlit → `POST /apply_filters` on MCP
-6. Extension polls `GET /sessions/{id}/pending_filters` every 2s
-7. Extension calls `dashboard.applyFilterAsync(...)` on the live dashboard
-8. Extension → `POST /sessions/{id}/pending_filters/ack`
+3. Streamlit → Agent `/ask` with `{ session_id, question }`
+4. Agent reads context → `GET /sessions/{id}/context` on MCP
+5. Agent (LLM) decides to filter → calls its `apply_filters` tool → `POST /apply_filters` on MCP
+6. Agent returns `{ answer_text, ... }` (user-facing text only)
+7. Streamlit renders `answer_text`
+8. Extension polls `GET /sessions/{id}/pending_filters` every 2s
+9. Extension calls `dashboard.applyFilterAsync(...)` on the live dashboard
+10. Extension → `POST /sessions/{id}/pending_filters/ack`
 
 ---
 
@@ -192,8 +204,8 @@ Use Tableau Desktop to load the extension from `http://localhost:8080/index.html
 |--------|------|--------|-------------|
 | GET | `/health` | ops | Health check |
 | PUT | `/sessions/{id}/context` | Extension | Register dashboard metadata |
-| GET | `/sessions/{id}/context` | Streamlit | Read dashboard metadata |
-| POST | `/apply_filters` | Streamlit | Queue filters for extension |
+| GET | `/sessions/{id}/context` | Agent / Streamlit | Read dashboard metadata |
+| POST | `/apply_filters` | LLM Agent | Queue filters for extension |
 | GET | `/sessions/{id}/pending_filters` | Extension | Poll queued filters |
 | POST | `/sessions/{id}/pending_filters/ack` | Extension | Clear queue after apply |
 
