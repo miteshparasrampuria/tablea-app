@@ -14,6 +14,9 @@
   let sessionId = "session-" + crypto.randomUUID();
   let pollTimer = null;
 
+  const filterHistory = [];
+  const MAX_HISTORY = 20;
+
   function setStatus(message, level) {
     statusText.textContent = message;
     statusDot.className = "";
@@ -136,12 +139,147 @@
     return [value];
   }
 
+  async function snapshotCurrentFilters() {
+    const snapshot = [];
+    for (const worksheet of dashboard.worksheets) {
+      try {
+        const filters = await worksheet.getFiltersAsync();
+        for (const filter of filters) {
+          try {
+            if (filter.filterType === tableau.FilterType.Categorical) {
+              const applied = filter.appliedValues || [];
+              snapshot.push({
+                worksheet: worksheet.name,
+                field: filter.fieldName,
+                type: "categorical",
+                isAllSelected: filter.isAllSelected || false,
+                values: applied.map(function (v) {
+                  return typeof v === "object" && v.formattedValue != null
+                    ? v.formattedValue
+                    : String(v);
+                }),
+              });
+            } else if (filter.filterType === tableau.FilterType.Quantitative) {
+              snapshot.push({
+                worksheet: worksheet.name,
+                field: filter.fieldName,
+                type: "range",
+                min: filter.minValue ? filter.minValue.value : null,
+                max: filter.maxValue ? filter.maxValue.value : null,
+              });
+            }
+          } catch (err) {
+            console.warn("Could not snapshot filter", filter.fieldName, err);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not read filters for worksheet", worksheet.name, err);
+      }
+    }
+    return snapshot;
+  }
+
+  async function restoreFilterSnapshot(snapshot) {
+    // Clear all active filters first so we start from a clean slate.
+    for (const worksheet of dashboard.worksheets) {
+      try {
+        const filters = await worksheet.getFiltersAsync();
+        for (const f of filters) {
+          try {
+            await worksheet.clearFilterAsync(f.fieldName);
+          } catch (err) {
+            console.warn("Could not clear filter during restore", f.fieldName, err);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not read filters during restore for worksheet", worksheet.name, err);
+      }
+    }
+
+    // Re-apply each filter from the snapshot, grouped by worksheet.
+    const worksheetMap = new Map(
+      dashboard.worksheets.map(function (ws) { return [ws.name, ws]; })
+    );
+
+    for (const entry of snapshot) {
+      const worksheet = worksheetMap.get(entry.worksheet);
+      if (!worksheet) continue;
+      try {
+        if (entry.type === "categorical") {
+          if (entry.isAllSelected || entry.values.length === 0) {
+            await worksheet.clearFilterAsync(entry.field);
+          } else {
+            await worksheet.applyFilterAsync(
+              entry.field,
+              entry.values,
+              tableau.FilterUpdateType.Replace
+            );
+          }
+        } else if (entry.type === "range") {
+          await worksheet.applyRangeFilterAsync(
+            entry.field,
+            { min: entry.min, max: entry.max },
+            tableau.FilterUpdateType.Replace
+          );
+        }
+      } catch (err) {
+        console.warn("Could not restore filter", entry.field, err);
+      }
+    }
+  }
+
+  async function clearFieldAcrossWorksheets(fieldName) {
+    for (const worksheet of dashboard.worksheets) {
+      try {
+        await worksheet.clearFilterAsync(fieldName);
+      } catch (err) {
+        // Field may not exist on this worksheet — not an error
+      }
+    }
+  }
+
   async function applyFilterSpec(spec) {
     const field = spec.field;
     const operator = (spec.operator || "=").toLowerCase();
     const rawValue = spec.value;
 
     if (!field) return false;
+
+    if (operator === "clear") {
+      if (field === "__all__") {
+        for (const worksheet of dashboard.worksheets) {
+          try {
+            const filters = await worksheet.getFiltersAsync();
+            for (const f of filters) {
+              try {
+                await worksheet.clearFilterAsync(f.fieldName);
+              } catch (err) {
+                console.warn("Could not clear filter", f.fieldName, err);
+              }
+            }
+          } catch (err) {
+            console.warn("Could not read filters from worksheet", worksheet.name, err);
+          }
+        }
+      } else {
+        await clearFieldAcrossWorksheets(field);
+      }
+      return true;
+    }
+
+    if (operator === "undo") {
+      const steps = Math.max(1, parseInt(rawValue, 10) || 1);
+      let snapshot = null;
+      for (let i = 0; i < steps && filterHistory.length > 0; i++) {
+        snapshot = filterHistory.pop();
+      }
+      if (snapshot === null) {
+        console.warn("Undo requested but filter history is empty.");
+        return false;
+      }
+      await restoreFilterSnapshot(snapshot);
+      return true;
+    }
 
     if (operator === "in" || Array.isArray(rawValue)) {
       const values = normalizeFilterValues(rawValue).map(String);
@@ -190,6 +328,18 @@
       const filters = payload.filters || [];
       if (!filters.length) return;
 
+      const hasNonUndo = filters.some(function (f) {
+        return (f.operator || "").toLowerCase() !== "undo";
+      });
+
+      // Snapshot current filter state before any mutating operation so the user
+      // can undo back to this point.
+      if (hasNonUndo) {
+        const snapshot = await snapshotCurrentFilters();
+        if (filterHistory.length >= MAX_HISTORY) filterHistory.shift();
+        filterHistory.push(snapshot);
+      }
+
       let applied = 0;
       for (const spec of filters) {
         try {
@@ -213,7 +363,17 @@
       );
 
       if (applied > 0) {
-        setStatus("Applied " + applied + " filter(s) to dashboard", "ok");
+        const operators = filters.map(function (f) {
+          return (f.operator || "").toLowerCase();
+        });
+        const allUndo = operators.every(function (op) { return op === "undo"; });
+        const allClear = operators.every(function (op) { return op === "clear"; });
+        const msg = allUndo
+          ? "Reverted to previous filter state (" + filterHistory.length + " step(s) remaining in history)"
+          : allClear
+          ? "Cleared filter(s) on dashboard"
+          : "Applied " + applied + " filter operation(s) to dashboard";
+        setStatus(msg, "ok");
       }
     } catch (err) {
       console.error("Poll error", err);
