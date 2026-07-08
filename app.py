@@ -10,6 +10,7 @@ Architecture:
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from typing import Any
 
@@ -219,6 +220,15 @@ for msg in st.session_state.messages:
 prompt = st.chat_input("Ask a question, e.g. 'Filter region to West and year to 2025'")
 
 if prompt:
+    # Guard against duplicate submissions of the same prompt within a few
+    # seconds — e.g. when the websocket reconnects inside the Tableau iframe
+    # and replays the last interaction. Prevents burning rate-limit slots.
+    last = st.session_state.get("last_prompt_meta")
+    now = time.time()
+    if last and last[0] == prompt and now - last[1] < 5:
+        st.stop()
+    st.session_state.last_prompt_meta = (prompt, now)
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -231,8 +241,15 @@ if prompt:
             result = call_agent_stream(prompt, placeholder)
         except requests.HTTPError as exc:
             placeholder.empty()
-            err = f"Agent API error: {exc.response.status_code} - {exc.response.text[:300]}"
-            st.error(err)
+            if exc.response is not None and exc.response.status_code == 429:
+                err = (
+                    "You're sending messages a bit too quickly — please wait a "
+                    "moment and try again."
+                )
+                st.warning(err)
+            else:
+                err = f"Agent API error: {exc.response.status_code} - {exc.response.text[:300]}"
+                st.error(err)
             st.session_state.messages.append({"role": "assistant", "content": err})
         except requests.RequestException as exc:
             placeholder.empty()
