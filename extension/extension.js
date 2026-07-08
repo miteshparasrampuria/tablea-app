@@ -9,10 +9,12 @@
   const statusDot = document.getElementById("status-dot");
   const statusText = document.getElementById("status-text");
   const chatFrame = document.getElementById("chat-frame");
+  const filterSummary = document.getElementById("filter-summary");
 
   let dashboard = null;
   let sessionId = "session-" + crypto.randomUUID();
   let pollTimer = null;
+  let summaryDebounce = null;
 
   const filterHistory = [];
   const MAX_HISTORY = 20;
@@ -228,6 +230,77 @@
     }
   }
 
+  function formatFilterValue(v) {
+    return typeof v === "object" && v !== null && v.formattedValue != null
+      ? v.formattedValue
+      : String(v);
+  }
+
+  async function updateFilterSummary() {
+    if (!dashboard || !filterSummary) return;
+
+    try {
+      const parts = [];
+      const seen = new Set();
+
+      for (const worksheet of dashboard.worksheets) {
+        const filters = await worksheet.getFiltersAsync();
+        for (const filter of filters) {
+          const field = filter.fieldName;
+          if (!field || seen.has(field)) continue;
+          seen.add(field);
+
+          if (filter.filterType === tableau.FilterType.Categorical) {
+            if (filter.isAllSelected) continue;
+            const applied = (filter.appliedValues || []).map(formatFilterValue);
+            if (!applied.length) continue;
+            const shown =
+              applied.length > 3
+                ? applied.slice(0, 3).join(", ") + " +" + (applied.length - 3) + " more"
+                : applied.join(", ");
+            parts.push(field + ": " + shown);
+          } else if (filter.filterType === tableau.FilterType.Quantitative) {
+            const min = filter.minValue ? filter.minValue.formattedValue : null;
+            const max = filter.maxValue ? filter.maxValue.formattedValue : null;
+            if (min == null && max == null) continue;
+            parts.push(field + ": " + (min != null ? min : "…") + " – " + (max != null ? max : "…"));
+          }
+        }
+      }
+
+      if (parts.length) {
+        filterSummary.textContent = "🔎 Showing: " + parts.join("  ·  ");
+        filterSummary.classList.add("active");
+      } else {
+        filterSummary.textContent = "No active filters";
+        filterSummary.classList.remove("active");
+      }
+      filterSummary.title = filterSummary.textContent;
+    } catch (err) {
+      console.warn("Could not update filter summary", err);
+    }
+  }
+
+  function scheduleSummaryUpdate() {
+    clearTimeout(summaryDebounce);
+    summaryDebounce = setTimeout(updateFilterSummary, 400);
+  }
+
+  function watchFilterChanges() {
+    // Catches manual filter changes made directly on the dashboard, not just
+    // ones the agent applies.
+    for (const worksheet of dashboard.worksheets) {
+      try {
+        worksheet.addEventListener(
+          tableau.TableauEventType.FilterChanged,
+          scheduleSummaryUpdate
+        );
+      } catch (err) {
+        console.warn("Could not watch filters on worksheet", worksheet.name, err);
+      }
+    }
+  }
+
   async function clearFieldAcrossWorksheets(fieldName) {
     for (const worksheet of dashboard.worksheets) {
       try {
@@ -374,6 +447,7 @@
           ? "Cleared filter(s) on dashboard"
           : "Applied " + applied + " filter operation(s) to dashboard";
         setStatus(msg, "ok");
+        scheduleSummaryUpdate();
       }
     } catch (err) {
       console.error("Poll error", err);
@@ -395,6 +469,9 @@
           "Preview mode — open inside Tableau Desktop to sync dashboard filters.",
           "err"
         );
+        if (filterSummary) {
+          filterSummary.textContent = "Filter summary unavailable in preview mode";
+        }
         chatFrame.src = buildStreamlitUrl();
         return;
       }
@@ -436,6 +513,8 @@
       }
 
       startPolling();
+      watchFilterChanges();
+      updateFilterSummary();
     } catch (err) {
       console.error(err);
       setStatus("Extension init failed: " + describeError(err), "err");

@@ -9,6 +9,7 @@ Architecture:
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -124,6 +125,55 @@ def call_agent(question: str) -> dict[str, Any]:
     return response.json()
 
 
+def _stream_endpoint() -> str:
+    """Derive the streaming endpoint from the configured /ask URL."""
+    return st.session_state.agent_url.rstrip("/") + "/stream"
+
+
+def call_agent_stream(question: str, placeholder) -> dict[str, Any]:
+    """Stream the answer from /ask/stream (SSE), rendering tokens live.
+
+    Updates `placeholder` as tokens arrive and returns the final structured
+    response dict. Falls back to the blocking /ask call if the deployed API
+    does not have the streaming endpoint yet (HTTP 404/405).
+    """
+    payload = {
+        "session_id": st.session_state.session_id,
+        "question": question,
+    }
+
+    response = requests.post(
+        _stream_endpoint(),
+        json=payload,
+        stream=True,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        headers={"Content-Type": "application/json"},
+    )
+    if response.status_code in (404, 405):
+        return call_agent(question)
+    response.raise_for_status()
+
+    streamed_text = ""
+    final: dict[str, Any] | None = None
+
+    for line in response.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data: "):
+            continue
+        event = json.loads(line[len("data: "):])
+
+        if event.get("type") == "token":
+            streamed_text += event.get("content", "")
+            placeholder.markdown(streamed_text + " ▌")
+        elif event.get("type") == "final":
+            final = event.get("response")
+        elif event.get("type") == "error":
+            raise RuntimeError(event.get("detail", "Unknown streaming error"))
+
+    if final is None:
+        raise ValueError("Stream ended without a final response.")
+    return final
+
+
 # ---------------------------------------------------------------------------
 # Rendering helpers
 # ---------------------------------------------------------------------------
@@ -178,7 +228,7 @@ if prompt:
         placeholder.markdown("_Thinking..._")
 
         try:
-            result = call_agent(prompt)
+            result = call_agent_stream(prompt, placeholder)
         except requests.HTTPError as exc:
             placeholder.empty()
             err = f"Agent API error: {exc.response.status_code} - {exc.response.text[:300]}"
@@ -189,9 +239,9 @@ if prompt:
             err = f"Network error contacting agent: {exc}"
             st.error(err)
             st.session_state.messages.append({"role": "assistant", "content": err})
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             placeholder.empty()
-            err = f"Agent returned non-JSON response: {exc}"
+            err = f"Agent error: {exc}"
             st.error(err)
             st.session_state.messages.append({"role": "assistant", "content": err})
         else:

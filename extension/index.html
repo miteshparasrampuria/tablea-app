@@ -31,9 +31,23 @@
       }
       #status-dot.ok { background: #34d399; }
       #status-dot.err { background: #f87171; }
+      #filter-summary {
+        padding: 5px 10px;
+        background: #e8f4f5;
+        color: #0f2c4a;
+        font-size: 12px;
+        border-bottom: 1px solid #d0e3e6;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #filter-summary.active {
+        background: #d7efe6;
+        font-weight: 600;
+      }
       #chat-frame {
         width: 100%;
-        height: calc(100% - 32px);
+        height: calc(100% - 59px);
         border: 0;
       }
     </style>
@@ -43,6 +57,7 @@
       <span id="status-dot"></span>
       <span id="status-text">Initializing Tableau extension…</span>
     </div>
+    <div id="filter-summary">No active filters</div>
     <iframe id="chat-frame" title="SpectraMedix Tableau Agent Chat"></iframe>
     <script src="./config.js"></script>
     <script src="./lib/tableau.extensions.1.latest.js"></script>
